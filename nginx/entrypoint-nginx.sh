@@ -59,10 +59,10 @@ wait_for_service() {
 echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-NGINX:${COLOR_RESET} ${COLOR_CYAN}${COLOR_BOLD}[Pre-Entrypoint]:${COLOR_RESET} Preparing environment before starting the ${COLOR_LIGHT_CYAN}Nginx${COLOR_RESET} service..."
 
 # Wait for 'php-fpm' to be up
-wait_for_service "wordpress" 9001
+wait_for_service "${WORDPRESS_SERVICE}" "${WORDPRESS_FPM_PORT}"
 
 # Wait for Wordpress core Initialization to complete
-wait_for_service "wordpress" 9999
+wait_for_service "${WORDPRESS_SERVICE}" "${WORDPRESS_READY_PORT}"
 
 # Check if required environment variables are set
 for var in \
@@ -72,12 +72,21 @@ for var in \
     NPP_WEB_ROOT \
     NGINX_WEB_USER \
     MOUNT_DIR \
-    NPP_HTTP_HOST; do
+    NPP_HTTP_HOST \
+    WORDPRESS_SERVICE \
+    WORDPRESS_FPM_PORT \
+    WORDPRESS_READY_PORT; do
     if [[ -z "${!var:-}" ]]; then
         echo -e "${COLOR_RED}${COLOR_BOLD}NPP-NGINX-FATAL:${COLOR_RESET} Missing required environment variable: ${COLOR_LIGHT_CYAN}${var}${COLOR_RESET} - ${COLOR_RED}Exiting...${COLOR_RESET}"
         exit 1
     fi
 done
+
+# Ensure cache directory exists
+if [[ ! -d "${MOUNT_DIR}" ]]; then
+    echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-NGINX:${COLOR_RESET} Creating cache directory ${COLOR_CYAN}${MOUNT_DIR}${COLOR_RESET}"
+    mkdir -p "${MOUNT_DIR}"
+fi
 
 # Create Isolated PHP process owner user and group on Nginx container
 echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-NGINX:${COLOR_RESET} Checking PHP process owner user and group with UID ${COLOR_CYAN}${NPP_UID}${COLOR_RESET} and GID ${COLOR_CYAN}${NPP_GID}${COLOR_RESET}"
