@@ -15,14 +15,13 @@ ENV PHP_EXTENSIONS="bz2 calendar ctype curl dom iconv json mbstring pdo_pgsql re
     xdiff filter igbinary opcache timezonedb bcmath shmop pcre geos"
 
 # Define ARG and ENV for critical environment variables with defaults
+# Note: Sensitive values like passwords should be provided at runtime via docker run/stack deploy
 ARG WORDPRESS_DB_HOST=db:3306
 ARG WORDPRESS_DB_USER=wordpress
-ARG WORDPRESS_DB_PASSWORD=""
 ARG WORDPRESS_DB_NAME=wordpress
 
 ENV WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST} \
     WORDPRESS_DB_USER=${WORDPRESS_DB_USER} \
-    WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD} \
     WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME}
 
 # Install dependencies
@@ -59,15 +58,17 @@ RUN install-php-extensions ${PHP_EXTENSIONS}
 # Copy the scripts into the container
 COPY wordpress/entrypoint-wp.sh /entrypoint-wp.sh
 COPY wordpress/wp-post.sh /scripts/wp-post.sh
+COPY wordpress/healthcheck.sh /healthcheck.sh
 
 # Make sure scripts are executable
 RUN chmod +x /entrypoint-wp.sh
 RUN chmod +x /scripts/wp-post.sh
+RUN chmod +x /healthcheck.sh
 
 # Add HEALTHCHECK for Docker Swarm monitoring
+# Verifies PHP-FPM configuration and database connectivity
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD php-fpm -t && \
-        mysql -h "${WORDPRESS_DB_HOST%%:*}" -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" "${WORDPRESS_DB_NAME}" -e "SELECT 1" > /dev/null 2>&1 || exit 1
+    CMD /healthcheck.sh
 
 # CMD
 CMD ["/entrypoint-wp.sh", "php-fpm"]

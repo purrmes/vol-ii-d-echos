@@ -121,7 +121,7 @@ services:
           memory: "1GB"
     
     healthcheck:
-      test: ["CMD-SHELL", "php-fpm -t && mysql -h \"$${WORDPRESS_DB_HOST%%:*}\" -u\"$${WORDPRESS_DB_USER}\" -p\"$${WORDPRESS_DB_PASSWORD}\" \"$${WORDPRESS_DB_NAME}\" -e 'SELECT 1' > /dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "/healthcheck.sh"]
       interval: 30s
       timeout: 10s
       retries: 3
