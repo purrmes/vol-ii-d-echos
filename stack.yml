@@ -1,0 +1,247 @@
+# Docker Swarm Stack Configuration for NPP WordPress
+# ====================================================
+# 
+# DEPLOYMENT INSTRUCTIONS:
+# -----------------------
+# 1. Ensure you have a Docker Swarm cluster initialized
+# 2. Configure your environment variables in .env file
+# 3. Deploy the stack:
+#    docker stack deploy -c stack.yml npp-wordpress
+# 4. Check deployment status:
+#    docker stack ps npp-wordpress
+#    docker service ls
+# 
+# PREREQUISITES:
+# --------------
+# - Docker Swarm mode enabled (docker swarm init)
+# - Traefik deployed as reverse proxy with network 'traefik'
+# - External MariaDB database accessible from swarm nodes
+# - External Valkey/Redis cache accessible from swarm nodes
+# - Pre-built images pushed to container registry
+# 
+# IMPORTANT NOTES:
+# ---------------
+# - Update all passwords and secrets in .env before deployment
+# - Set NPP_HTTP_HOST to your actual domain name
+# - Ensure persistent volumes are properly configured for production
+# - Review resource limits based on your cluster capacity
+# - SSL/TLS is handled by Traefik reverse proxy
+# ====================================================
+
+version: '3.8'
+
+services:
+  wordpress:
+    image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/wordpress:latest
+    env_file:
+      - .env
+    environment:
+      # Database Configuration
+      - WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST}
+      - WORDPRESS_DB_USER=${WORDPRESS_DB_USER}
+      - WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD}
+      - WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME}
+      - WORDPRESS_TABLE_PREFIX=${WORDPRESS_TABLE_PREFIX:-wp_}
+      
+      # Redis/Valkey Cache Configuration
+      - REDIS_HOST=${VALKEY_HOST}
+      - REDIS_PORT=${VALKEY_PORT:-6379}
+      - REDIS_PASSWORD=${VALKEY_PASSWORD}
+      - REDIS_DATABASE=${VALKEY_DATABASE:-0}
+      - WP_REDIS_HOST=${VALKEY_HOST}
+      - WP_REDIS_PORT=${VALKEY_PORT:-6379}
+      - WP_REDIS_PASSWORD=${VALKEY_PASSWORD}
+      - WP_REDIS_DATABASE=${VALKEY_DATABASE:-0}
+      - WP_CACHE_KEY_SALT=${NPP_HTTP_HOST}
+      
+      # WordPress Core Configuration
+      - WORDPRESS_CONFIG_EXTRA=
+          define('FORCE_SSL_ADMIN', true);
+          define('FORCE_SSL_LOGIN', true);
+          if (defined('WP_CLI') && WP_CLI && !isset($$_SERVER['HTTP_HOST'])) $$_SERVER['HTTP_HOST'] = "${NPP_HTTP_HOST}";
+      
+      # NPP Configuration
+      - NPP_WEB_ROOT=${NPP_WEB_ROOT_:-/var/www/html}
+      - NPP_NGINX_CACHE_PATH=${NPP_NGINX_CACHE_PATH_:-/var/cache/nginx}
+      - NPP_HTTP_HOST=${NPP_HTTP_HOST}
+      - NPP_USER=${NPP_USER_:-npp}
+      - NPP_UID=${NPP_UID_:-18978}
+      - NPP_GID=${NPP_GID_:-33749}
+      
+      # WordPress Installation Configuration (Optional - for WP-CLI)
+      - WORDPRESS_SITE_URL=${WORDPRESS_SITE_URL_}
+      - WORDPRESS_SITE_TITLE=${WORDPRESS_SITE_TITLE_}
+      - WORDPRESS_ADMIN_USER=${WORDPRESS_ADMIN_USER_}
+      - WORDPRESS_ADMIN_PASSWORD=${WORDPRESS_ADMIN_PASSWORD_}
+      - WORDPRESS_ADMIN_EMAIL=${WORDPRESS_ADMIN_EMAIL_}
+    
+    volumes:
+      # Persistent WordPress files
+      - wordpress_data:/var/www/html
+      # Shared nginx cache
+      - nginx_cache:/var/cache/nginx
+      # Configuration files
+      - ${NPP_FPM_CONF:-./fpm/www.conf}:/usr/local/etc/php-fpm.d/www.conf:ro
+      - ${FPM_DOCKER_CONF:-./fpm/zz-docker.conf}:/usr/local/etc/php-fpm.d/zz-docker.conf:ro
+      - ${NPP_PHP_CONF:-./php/npp.ini}:/usr/local/etc/php/conf.d/npp.ini:ro
+      # Timezone synchronization
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    
+    networks:
+      - npp_network
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        order: stop-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2GB"
+        reservations:
+          cpus: "0.5"
+          memory: "1GB"
+    
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t && mysql -h \"$${WORDPRESS_DB_HOST%%:*}\" -u\"$${WORDPRESS_DB_USER}\" -p\"$${WORDPRESS_DB_PASSWORD}\" \"$${WORDPRESS_DB_NAME}\" -e 'SELECT 1' > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  nginx:
+    image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/nginx:latest
+    env_file:
+      - .env
+    environment:
+      - NPP_WEB_ROOT=${NPP_WEB_ROOT_:-/var/www/html}
+      - NPP_USER=${NPP_USER_:-npp}
+      - NPP_UID=${NPP_UID_:-18978}
+      - NPP_GID=${NPP_GID_:-33749}
+      - NGINX_WEB_USER=${NGINX_WEB_USER_:-nginx}
+      - NPP_HTTP_HOST=${NPP_HTTP_HOST}
+    
+    volumes:
+      # Shared WordPress files (read-only)
+      - wordpress_data:/var/www/html:ro
+      # Shared nginx cache
+      - nginx_cache:/var/cache/nginx
+      # Nginx configuration
+      - ${NGINX_CONF:-./nginx/nginx.conf}:/etc/nginx/nginx.conf:ro
+      - ${NPP_NGINX_CONF:-./nginx/default.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${NPP_NGINX_PARAMS_CONF:-./nginx/fastcgi_params}:/etc/nginx/fastcgi_params:ro
+      # Timezone synchronization
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    
+    networks:
+      - npp_network
+      - traefik
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        order: start-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1.5GB"
+        reservations:
+          cpus: "0.25"
+          memory: "512MB"
+      labels:
+        # Enable Traefik
+        - "traefik.enable=true"
+        
+        # HTTP Router (redirects to HTTPS)
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}-http.rule=Host(`${NPP_HTTP_HOST}`)"
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}-http.entrypoints=web"
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}-http.middlewares=redirect-to-https"
+        
+        # HTTPS Router
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}.rule=Host(`${NPP_HTTP_HOST}`)"
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}.entrypoints=websecure"
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}.tls=true"
+        - "traefik.http.routers.${TRAEFIK_ROUTER_NAME:-npp}.tls.certresolver=letsencrypt"
+        
+        # Middleware for HTTPS redirect
+        - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+        
+        # Service configuration
+        - "traefik.http.services.${TRAEFIK_ROUTER_NAME:-npp}.loadbalancer.server.port=80"
+        
+        # Docker Swarm specific
+        - "traefik.docker.network=traefik"
+    
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/nginx-health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# Named volumes for persistent data
+volumes:
+  wordpress_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WORDPRESS_HOME:-./wordpress}
+  
+  nginx_cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=500m,uid=${NPP_UID_:-18978},gid=${NPP_GID_:-33749}
+
+# Networks
+networks:
+  npp_network:
+    driver: overlay
+    attachable: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.20.0.0/24
+  
+  traefik:
+    external: true
+    name: traefik
