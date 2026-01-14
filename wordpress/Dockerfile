@@ -26,6 +26,7 @@ ENV WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST} \
 
 # Install dependencies
 # Separate runtime and build-time dependencies for optimization
+# Note: apt cache is cleaned up at the end to reduce image size
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Install runtime dependencies for NPP core
     procps \
