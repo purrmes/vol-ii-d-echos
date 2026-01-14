@@ -38,11 +38,20 @@ COLOR_LIGHT_CYAN='\033[0;96m'
 # Display pre-entrypoint start message
 echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} ${COLOR_CYAN}${COLOR_BOLD}[Pre-Entrypoint]:${COLOR_RESET} Preparing environment before starting the ${COLOR_LIGHT_CYAN}WordPress${COLOR_RESET} service..."
 
+# Set default values for environment variables if not provided
+: "${WORDPRESS_DB_HOST:=db:3306}"
+: "${WORDPRESS_DB_USER:=wordpress}"
+: "${WORDPRESS_DB_NAME:=wordpress}"
+
 # Check if required environment variables are set
 for var in \
     NPP_UID \
     NPP_GID \
-    NPP_USER; do
+    NPP_USER \
+    WORDPRESS_DB_HOST \
+    WORDPRESS_DB_USER \
+    WORDPRESS_DB_PASSWORD \
+    WORDPRESS_DB_NAME; do
     if [[ -z "${!var:-}" ]]; then
         echo -e "${COLOR_RED}${COLOR_BOLD}NPP-WP-FATAL:${COLOR_RESET} Missing required environment variable(s): ${COLOR_LIGHT_CYAN}${var}${COLOR_RESET} - ${COLOR_RED}Exiting...${COLOR_RESET}"
         exit 1

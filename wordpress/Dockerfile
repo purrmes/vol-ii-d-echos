@@ -14,9 +14,20 @@ ENV PHP_EXTENSIONS="bz2 calendar ctype curl dom iconv json mbstring pdo_pgsql re
     xdebug apcu zlib session redis uuid brotli http mailparse ssh2 xattr \
     xdiff filter igbinary opcache timezonedb bcmath shmop pcre geos"
 
+# Define ARG and ENV for critical environment variables with defaults
+# Note: Sensitive values like passwords should be provided at runtime via docker run/stack deploy
+ARG WORDPRESS_DB_HOST=db:3306
+ARG WORDPRESS_DB_USER=wordpress
+ARG WORDPRESS_DB_NAME=wordpress
+
+ENV WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST} \
+    WORDPRESS_DB_USER=${WORDPRESS_DB_USER} \
+    WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME}
+
 # Install dependencies
-# Build time dependencies will purged soon
-RUN apt-get update && apt-get install -y \
+# Separate runtime and build-time dependencies for optimization
+# Note: apt cache is cleaned up at the end to reduce image size
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # Install runtime dependencies for NPP core
     procps \
     gawk \
@@ -33,7 +44,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     # Install dev deploy dependencies
     git \
-    dos2unix
+    dos2unix \
+    && rm -rf /var/lib/apt/lists/*
 
 # Get WP-CLI
 RUN curl -LO ${WP_CLI_URL} \
@@ -47,10 +59,17 @@ RUN install-php-extensions ${PHP_EXTENSIONS}
 # Copy the scripts into the container
 COPY wordpress/entrypoint-wp.sh /entrypoint-wp.sh
 COPY wordpress/wp-post.sh /scripts/wp-post.sh
+COPY wordpress/healthcheck.sh /healthcheck.sh
 
 # Make sure scripts are executable
 RUN chmod +x /entrypoint-wp.sh
 RUN chmod +x /scripts/wp-post.sh
+RUN chmod +x /healthcheck.sh
+
+# Add HEALTHCHECK for Docker Swarm monitoring
+# Verifies PHP-FPM configuration and process is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD /healthcheck.sh
 
 # CMD
 CMD ["/entrypoint-wp.sh", "php-fpm"]
