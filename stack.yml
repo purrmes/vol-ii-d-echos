@@ -28,8 +28,6 @@
 # - SSL/TLS is handled by Traefik reverse proxy
 # ====================================================
 
-version: '3.8'
-
 services:
   wordpress:
     image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/wordpress:latest
