@@ -117,21 +117,21 @@ services:
       # HTTP to HTTPS Redirect
       - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.rule=Host(`${NPP_HTTP_HOST}`)"
       - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.entrypoints=web"
-      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.middlewares=redirect-to-https@docker"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.middlewares=${TRAEFIK_ROUTER_NAME}-redirect-to-https"
+      - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-redirect-to-https.redirectscheme.permanent=true"
       
       # Optional: Additional security headers via Traefik middleware
-      # - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.middlewares=security-headers@docker"
-      # - "traefik.http.middlewares.security-headers.headers.stsSeconds=31536000"
-      # - "traefik.http.middlewares.security-headers.headers.stsIncludeSubdomains=true"
-      # - "traefik.http.middlewares.security-headers.headers.stsPreload=true"
-      # - "traefik.http.middlewares.security-headers.headers.forceSTSHeader=true"
+      # - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.middlewares=${TRAEFIK_ROUTER_NAME}-security-headers"
+      # - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-security-headers.headers.stsSeconds=31536000"
+      # - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-security-headers.headers.stsIncludeSubdomains=true"
+      # - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-security-headers.headers.stsPreload=true"
+      # - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-security-headers.headers.forceSTSHeader=true"
       
       # Optional: Rate limiting via Traefik
-      # - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.middlewares=rate-limit@docker"
-      # - "traefik.http.middlewares.rate-limit.ratelimit.average=100"
-      # - "traefik.http.middlewares.rate-limit.ratelimit.burst=50"
+      # - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.middlewares=${TRAEFIK_ROUTER_NAME}-rate-limit"
+      # - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-rate-limit.ratelimit.average=100"
+      # - "traefik.http.middlewares.${TRAEFIK_ROUTER_NAME}-rate-limit.ratelimit.burst=50"
       
     volumes:
       # WordPress files - read-only for nginx
