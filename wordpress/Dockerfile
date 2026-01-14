@@ -67,7 +67,7 @@ RUN chmod +x /scripts/wp-post.sh
 RUN chmod +x /healthcheck.sh
 
 # Add HEALTHCHECK for Docker Swarm monitoring
-# Verifies PHP-FPM configuration and database connectivity
+# Verifies PHP-FPM configuration and process is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD /healthcheck.sh
 
