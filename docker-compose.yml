@@ -115,6 +115,10 @@ services:
       - NPP_GID=${NPP_GID_}
       - NGINX_WEB_USER=${NGINX_WEB_USER_}
       - NPP_HTTP_HOST=${NPP_HTTP_HOST}
+      - MOUNT_DIR=${NPP_NGINX_CACHE_PATH_}
+      - WORDPRESS_SERVICE=${WORDPRESS_SERVICE:-wordpress}
+      - WORDPRESS_FPM_PORT=${WORDPRESS_FPM_PORT:-9001}
+      - WORDPRESS_READY_PORT=${WORDPRESS_READY_PORT:-9999}
     networks:
       - npp_network
       - traefik

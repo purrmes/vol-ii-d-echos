@@ -1,5 +1,37 @@
 # Production Deployment Guide
 
+## Prerequisites
+
+### Required Infrastructure
+
+This deployment requires the following external services to be available:
+
+1. **Traefik Reverse Proxy** (Required)
+   - Must be deployed in your Docker Swarm cluster
+   - Must have a network named `traefik` for service discovery
+   - Should be configured with Let's Encrypt for automatic TLS certificates
+   - Entry points: `web` (port 80) and `websecure` (port 443)
+
+2. **MariaDB Database** (External)
+   - Hostname: `livre-des-echos-mariadb-zq4m2z` (or your database server)
+   - Database: `db_vol_i`
+   - User: `db_user`
+   - Password: Provided via `DB_PASSWORD` environment variable
+
+3. **Valkey/Redis Cache** (External)
+   - Compatible Redis server for object caching
+   - Configured in `.env` file
+
+### Architecture Overview
+
+```
+Internet → Traefik (TLS) → Nginx (HTTP:80) → WordPress (PHP-FPM)
+                         ↓                   ↓
+                    Let's Encrypt      FastCGI Cache
+```
+
+**Important:** Nginx handles only internal HTTP traffic (port 80). Traefik manages all TLS termination, certificates, and external access.
+
 ## Pre-Deployment Checklist
 
 ### 1. Security Configuration
@@ -22,15 +54,28 @@
 - [ ] `NPP_HTTP_HOST` - Set to your actual domain (e.g., example.com)
 - [ ] `WORDPRESS_SITE_URL_` - Set to your full site URL (e.g., https://example.com)
 - [ ] `WORDPRESS_SITE_TITLE_` - Set your site title
+- [ ] `TRAEFIK_ROUTER_NAME` - Set a unique name for Traefik routing (e.g., my-wordpress-site)
 
-### 3. SSL Certificates
+### 3. Traefik Configuration
 
-**Configure SSL certificates:**
-- [ ] Place your SSL certificates in the `./ssl` directory
-- [ ] Ensure proper certificate file naming
-- [ ] Verify nginx SSL configuration in `./nginx/default.conf`
+**Ensure Traefik is properly configured:**
+- [ ] Traefik is deployed in your Docker Swarm cluster
+- [ ] Traefik has a network named `traefik` for service discovery
+- [ ] Let's Encrypt certificate resolver is configured (if using automatic TLS)
+- [ ] Entry points `web` (80) and `websecure` (443) are defined
+- [ ] DNS records point your domain to the Swarm cluster
 
-### 4. Resource Limits
+**Note:** TLS/SSL certificates are managed by Traefik. No manual certificate configuration is needed in Nginx.
+
+### 4. SSL/TLS Certificates
+
+**TLS is handled by Traefik:**
+- Traefik automatically obtains and renews Let's Encrypt certificates
+- Nginx configuration no longer includes SSL directives
+- All HTTPS traffic is terminated at Traefik before reaching Nginx
+- Nginx only handles internal HTTP traffic on port 80
+
+### 5. Resource Limits
 
 **Review and adjust resource limits in `docker-compose.yml` based on your server:**
 - WordPress container: Currently set to 2GB RAM, 1 CPU
@@ -38,14 +83,14 @@
 
 **Note:** Database resources are managed separately in the external MariaDB deployment.
 
-### 5. Database Configuration
+### 6. Database Configuration
 
 **Review MySQL configuration:**
 - [ ] Check `./mysql/50-npp-server.cnf` for production settings
 - [ ] Ensure proper character set and collation
 - [ ] Review buffer sizes and cache settings
 
-### 5. PHP Configuration
+### 7. PHP Configuration
 
 **Review PHP settings in `./php/npp.ini`:**
 - [ ] Verify `display_errors = Off` for production
@@ -53,13 +98,15 @@
 - [ ] Review file upload limits
 - [ ] Verify opcache settings are optimized
 
-### 6. Nginx Configuration
+### 8. Nginx Configuration
 
 **Review Nginx settings:**
 - [ ] Verify cache settings in `./nginx/default.conf`
 - [ ] Check fastcgi cache configuration
-- [ ] Ensure proper security headers
-- [ ] Review rate limiting settings
+- [ ] Nginx is configured for internal HTTP only (no TLS)
+- [ ] Review rate limiting settings (can also be done in Traefik)
+
+**Note:** Security headers (HSTS, CSP, etc.) should be configured in Traefik middleware for centralized management.
 
 ## Deployment Steps
 
@@ -144,13 +191,33 @@ exit
 ```
 
 ### 6. Post-Deployment Verification
-external MariaDB 
+
+- [ ] Verify Traefik is running and accessible
+- [ ] Check Traefik dashboard for service discovery
+- [ ] Verify TLS certificate is obtained (if using Let's Encrypt)
 - [ ] Verify site is accessible via HTTPS
+- [ ] Test HTTP to HTTPS redirect
 - [ ] Test WordPress admin login
-- [ ] Check nginx cache is working
+- [ ] Check nginx cache is working (NPP-FastCGI-Cache header)
 - [ ] Verify database connectivity
 - [ ] Test file uploads
 - [ ] Review container logs for errors
+- [ ] Check Docker Swarm health checks are passing
+
+**Verify Traefik Integration:**
+```bash
+# Check if Traefik can see the Nginx service
+docker service ls | grep npp
+
+# View Traefik logs
+docker service logs traefik
+
+# Check Nginx service status
+docker service ps npp_nginx
+
+# Verify health checks
+docker service inspect npp_nginx --format='{{.Spec.TaskTemplate.HealthCheck}}'
+```
 
 ## Monitoring and Maintenance
 
