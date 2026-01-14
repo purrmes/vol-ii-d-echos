@@ -1,0 +1,249 @@
+# Example Docker Swarm Stack Configuration for NPP WordPress
+# -----------------------------------------------------------
+# This is an example stack file demonstrating deployment with Traefik
+# 
+# Usage:
+#   1. Copy this file: cp stack.yml production-stack.yml
+#   2. Update all configuration values in .env file
+#   3. Deploy: docker stack deploy -c production-stack.yml npp
+#
+# Prerequisites:
+#   - Docker Swarm cluster initialized
+#   - Traefik deployed with 'traefik' network
+#   - External MariaDB instance
+#   - External Valkey/Redis instance
+#   - Images built and pushed to registry
+# -----------------------------------------------------------
+
+version: '3.8'
+
+services:
+  wordpress:
+    image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/wordpress:latest
+    env_file:
+      - .env
+    volumes:
+      # WordPress files - use a volume or NFS for multi-node deployments
+      - wordpress_data:${NPP_WEB_ROOT_}
+      # Nginx cache - shared across nginx replicas if needed
+      - nginx_cache:${NPP_NGINX_CACHE_PATH_}
+      # Configuration files
+      - ${NGINX_CONF}:/etc/nginx/nginx.conf:ro
+      - ${NPP_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro
+      - ${NPP_FPM_CONF}:/usr/local/etc/php-fpm.d/www.conf:ro
+      - ${FPM_DOCKER_CONF}:/usr/local/etc/php-fpm.d/zz-docker.conf:ro
+      - ${NPP_PHP_CONF}:/usr/local/etc/php/conf.d/npp.ini:ro
+      # Timezone sync
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      # Database configuration
+      - WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST}
+      - WORDPRESS_DB_USER=${WORDPRESS_DB_USER}
+      - WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD}
+      - WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME}
+      - WORDPRESS_TABLE_PREFIX=${WORDPRESS_TABLE_PREFIX}
+      # Valkey/Redis configuration
+      - REDIS_HOST=${VALKEY_HOST}
+      - REDIS_PORT=${VALKEY_PORT}
+      - REDIS_PASSWORD=${VALKEY_PASSWORD}
+      - REDIS_DATABASE=${VALKEY_DATABASE}
+      - WP_REDIS_HOST=${VALKEY_HOST}
+      - WP_REDIS_PORT=${VALKEY_PORT}
+      - WP_REDIS_PASSWORD=${VALKEY_PASSWORD}
+      - WP_REDIS_DATABASE=${VALKEY_DATABASE}
+      - WP_CACHE_KEY_SALT=${NPP_HTTP_HOST}
+      # WordPress SSL configuration for Traefik
+      - WORDPRESS_CONFIG_EXTRA=
+          define('FORCE_SSL_ADMIN', true);
+          define('FORCE_SSL_LOGIN', true);
+          if (defined('WP_CLI') && WP_CLI && !isset($$_SERVER['HTTP_HOST'])) $$_SERVER['HTTP_HOST'] = "${NPP_HTTP_HOST}";
+      # NPP plugin configuration
+      - NPP_WEB_ROOT=${NPP_WEB_ROOT_}
+      - NPP_NGINX_CACHE_PATH=${NPP_NGINX_CACHE_PATH_}
+      - NPP_HTTP_HOST=${NPP_HTTP_HOST}
+      - NPP_USER=${NPP_USER_}
+      - NPP_UID=${NPP_UID_}
+      - NPP_GID=${NPP_GID_}
+      # WordPress setup (optional - can be done via UI)
+      - WORDPRESS_SITE_URL=${WORDPRESS_SITE_URL_}
+      - WORDPRESS_SITE_TITLE=${WORDPRESS_SITE_TITLE_}
+      - WORDPRESS_ADMIN_USER=${WORDPRESS_ADMIN_USER_}
+      - WORDPRESS_ADMIN_PASSWORD=${WORDPRESS_ADMIN_PASSWORD_}
+      - WORDPRESS_ADMIN_EMAIL=${WORDPRESS_ADMIN_EMAIL_}
+    networks:
+      - npp_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        order: stop-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2GB"
+        reservations:
+          cpus: "0.5"
+          memory: "1GB"
+
+  nginx:
+    image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/nginx:latest
+    env_file:
+      - .env
+    labels:
+      # Enable Traefik for this service
+      - "traefik.enable=true"
+      
+      # HTTPS Router Configuration
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.rule=Host(`${NPP_HTTP_HOST}`)"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls=true"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${TRAEFIK_ROUTER_NAME}.loadbalancer.server.port=80"
+      
+      # HTTP to HTTPS Redirect
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.rule=Host(`${NPP_HTTP_HOST}`)"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.entrypoints=web"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.middlewares=redirect-to-https@docker"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+      
+      # Optional: Additional security headers via Traefik middleware
+      # - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.middlewares=security-headers@docker"
+      # - "traefik.http.middlewares.security-headers.headers.stsSeconds=31536000"
+      # - "traefik.http.middlewares.security-headers.headers.stsIncludeSubdomains=true"
+      # - "traefik.http.middlewares.security-headers.headers.stsPreload=true"
+      # - "traefik.http.middlewares.security-headers.headers.forceSTSHeader=true"
+      
+      # Optional: Rate limiting via Traefik
+      # - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.middlewares=rate-limit@docker"
+      # - "traefik.http.middlewares.rate-limit.ratelimit.average=100"
+      # - "traefik.http.middlewares.rate-limit.ratelimit.burst=50"
+      
+    volumes:
+      # WordPress files - read-only for nginx
+      - wordpress_data:${NPP_WEB_ROOT_}:ro
+      # Nginx cache - shared with wordpress service
+      - nginx_cache:${NPP_NGINX_CACHE_PATH_}
+      # Configuration files
+      - ${NGINX_CONF}:/etc/nginx/nginx.conf:ro
+      - ${NPP_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro
+      - ${NPP_NGINX_PARAMS_CONF}:/etc/nginx/fastcgi_params:ro
+      # Timezone sync
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      # Nginx configuration
+      - NPP_WEB_ROOT=${NPP_WEB_ROOT_}
+      - NPP_USER=${NPP_USER_}
+      - NPP_UID=${NPP_UID_}
+      - NPP_GID=${NPP_GID_}
+      - NGINX_WEB_USER=${NGINX_WEB_USER_}
+      - NPP_HTTP_HOST=${NPP_HTTP_HOST}
+      - MOUNT_DIR=${NPP_NGINX_CACHE_PATH_}
+      # Docker Swarm service discovery variables
+      - WORDPRESS_SERVICE=wordpress
+      - WORDPRESS_FPM_PORT=9001
+      - WORDPRESS_READY_PORT=9999
+    networks:
+      - npp_network
+      - traefik
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        order: start-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1.5GB"
+        reservations:
+          cpus: "0.5"
+          memory: "1GB"
+      # Placement constraints (optional - use for node affinity)
+      # placement:
+      #   constraints:
+      #     - node.role == worker
+      #     - node.labels.nginx == true
+
+volumes:
+  wordpress_data:
+    driver: local
+    # For multi-node Swarm, consider using NFS or other shared storage:
+    # driver: local
+    # driver_opts:
+    #   type: nfs
+    #   o: addr=nfs-server.example.com,rw,nfsvers=4
+    #   device: ":/path/to/wordpress"
+  
+  nginx_cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=500m
+    # Note: tmpfs volumes are node-local. For multi-replica nginx,
+    # consider using a shared cache or accepting cache per node.
+
+networks:
+  npp_network:
+    driver: overlay
+    attachable: true
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
+  
+  traefik:
+    external: true
+    name: traefik
+    # Ensure this network exists and Traefik is connected to it
+
+# -----------------------------------------------------------
+# Deployment Notes:
+# -----------------------------------------------------------
+# 1. Build and push images before deploying:
+#    docker compose build
+#    docker compose push
+#
+# 2. Ensure Traefik is configured with:
+#    - Let's Encrypt certificate resolver named 'letsencrypt'
+#    - Entry points 'web' (80) and 'websecure' (443)
+#    - Network 'traefik' for service discovery
+#
+# 3. For production, consider:
+#    - Using secrets for sensitive data instead of environment variables
+#    - Implementing volume backups
+#    - Setting up monitoring and alerting
+#    - Configuring log aggregation
+#    - Using constraint-based placement for high availability
+#
+# 4. Scale services if needed:
+#    docker service scale npp_nginx=3
+#    Note: WordPress replicas require shared storage
+# -----------------------------------------------------------
