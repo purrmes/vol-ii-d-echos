@@ -14,8 +14,8 @@ php-fpm -t > /dev/null 2>&1 || exit 1
 # Check if PHP-FPM is responsive by verifying the socket/port is listening
 # PHP-FPM typically listens on port 9000 or a Unix socket
 if [ -S /run/php-fpm/www.sock ]; then
-    # Check Unix socket exists and is accessible
-    test -S /run/php-fpm/www.sock || exit 1
+    # Unix socket exists and is accessible
+    true
 elif netstat -tln 2>/dev/null | grep -q ':9000 ' || ss -tln 2>/dev/null | grep -q ':9000 '; then
     # Check if listening on port 9000
     true
