@@ -42,9 +42,7 @@ echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} ${COLOR_CYAN}${COLOR_B
 for var in \
     NPP_UID \
     NPP_GID \
-    NPP_NGINX_CACHE_PATH \
-    NPP_USER \
-    MOUNT_DIR; do
+    NPP_USER; do
     if [[ -z "${!var:-}" ]]; then
         echo -e "${COLOR_RED}${COLOR_BOLD}NPP-WP-FATAL:${COLOR_RESET} Missing required environment variable(s): ${COLOR_LIGHT_CYAN}${var}${COLOR_RESET} - ${COLOR_RED}Exiting...${COLOR_RESET}"
         exit 1
@@ -61,29 +59,6 @@ else
     echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} PHP process owner user ${COLOR_LIGHT_CYAN}${NPP_USER}${COLOR_RESET} is already exists! Skipping..."
 fi
 
-# Ensure the mount directory for bindfs exists
-if [[ ! -d "${MOUNT_DIR}" ]]; then
-    mkdir -p "${MOUNT_DIR}"
-    echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} Nginx cache FUSE mount directory: ${COLOR_LIGHT_CYAN}${MOUNT_DIR}${COLOR_RESET} is created! Proceeding..."
-else
-    echo -e "${COLOR_YELLOW}${COLOR_BOLD}NPP-WP:${COLOR_RESET} Nginx cache FUSE mount directory: ${COLOR_LIGHT_CYAN}${MOUNT_DIR}${COLOR_RESET} is already exists! Skipping..."
-fi
-
-# Wait until the Nginx Cache Path exists
-while [[ ! -d "${NPP_NGINX_CACHE_PATH}" ]]; do
-    echo -e "${COLOR_YELLOW}${COLOR_BOLD}NPP-WP:${COLOR_RESET} Nginx Cache Path: ${COLOR_LIGHT_CYAN}${NPP_NGINX_CACHE_PATH}${COLOR_RESET} is not ready. Retrying..."
-    sleep 2
-done
-echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} Nginx Cache Path: ${COLOR_LIGHT_CYAN}${NPP_NGINX_CACHE_PATH}${COLOR_RESET} is ready! Proceeding..."
-
-# Mount Nginx cache path with 'bindfs' to grant PHP process owner the necessary permissions
-if ! bindfs -u "${NPP_UID}" -g "${NPP_GID}" --perms=u=rwx:g=rx:o= "${NPP_NGINX_CACHE_PATH}" "${MOUNT_DIR}"; then
-    echo -e "${COLOR_RED}${COLOR_BOLD}NPP-WP-FATAL:${COLOR_RESET} Mounting with ${COLOR_LIGHT_CYAN}bindfs${COLOR_RESET} failed! ${COLOR_RED}Continuing despite the error...${COLOR_RESET}"
-fi
-
-# Log that the bindfs mount was successful
-echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} The Nginx Cache Path: ${COLOR_LIGHT_CYAN}${NPP_NGINX_CACHE_PATH}${COLOR_RESET} has been successfully mounted to ${COLOR_LIGHT_CYAN}${MOUNT_DIR}${COLOR_RESET} with ${COLOR_CYAN}UID:${NPP_UID}${COLOR_RESET} and ${COLOR_CYAN}GID:${NPP_GID}${COLOR_RESET}."
-
 # Fix permissions for consistency
 chown -R root:root \
     /etc/nginx \
@@ -92,12 +67,12 @@ chown -R root:root \
 echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} Permissions fixed successfully!" ||
 echo -e "${COLOR_RED}${COLOR_BOLD}NPP-WP:${COLOR_RESET} Failed to fix permissions!"
 
-# Wait for the 'wordpress-db' to be ready
-until mysql -h wordpress-db -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" "${WORDPRESS_DB_NAME}" -e "SELECT 1" > /dev/null 2>&1; do
-    echo -e "${COLOR_YELLOW}${COLOR_BOLD}NPP-WP:${COLOR_RESET} The ${COLOR_LIGHT_CYAN}MySQL database${COLOR_RESET} is not available yet. Retrying..."
+# Wait for the external MariaDB database to be ready
+until mysql -h "${WORDPRESS_DB_HOST%%:*}" -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" "${WORDPRESS_DB_NAME}" -e "SELECT 1" > /dev/null 2>&1; do
+    echo -e "${COLOR_YELLOW}${COLOR_BOLD}NPP-WP:${COLOR_RESET} The ${COLOR_LIGHT_CYAN}MariaDB database${COLOR_RESET} is not available yet. Retrying..."
     sleep 6
 done
-echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} The ${COLOR_LIGHT_CYAN}MySQL database${COLOR_RESET} is ready! Proceeding..."
+echo -e "${COLOR_GREEN}${COLOR_BOLD}NPP-WP:${COLOR_RESET} The ${COLOR_LIGHT_CYAN}MariaDB database${COLOR_RESET} is ready! Proceeding..."
 
 # Start php-fpm
 exec /usr/local/bin/docker-entrypoint.sh "$@"

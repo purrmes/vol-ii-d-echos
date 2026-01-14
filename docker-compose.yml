@@ -1,17 +1,22 @@
-name: npp
+# Production Docker Swarm Configuration for NPP WordPress
+# -----------------------------------------------------------
+# Deployment Notes:
+# - Deploy with: docker stack deploy -c docker-compose.yml npp
+# - All development features have been removed
+# - Update all passwords and secrets in .env before deployment
+# - Set NPP_HTTP_HOST to your actual domain name
+# - Images must be pre-built and pushed to registry before deployment
+# - Build images with: docker compose build && docker compose push
+# - Review resource limits based on your cluster capacity
+# -----------------------------------------------------------
+
+version: '3.8'
 
 services:
   wordpress:
-    build:
-      context: .
-      dockerfile: wordpress/Dockerfile
     image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/wordpress:latest
-    container_name: wordpress-fpm
-    expose:
-      - "9001"
     env_file:
       - .env
-    restart: unless-stopped
     volumes:
       - ${WORDPRESS_HOME}:${NPP_WEB_ROOT_}
       - ${NGINX_CACHE}:${NPP_NGINX_CACHE_PATH_}
@@ -27,6 +32,16 @@ services:
       - WORDPRESS_DB_USER=${WORDPRESS_DB_USER}
       - WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD}
       - WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME}
+      - WORDPRESS_TABLE_PREFIX=${WORDPRESS_TABLE_PREFIX}
+      - REDIS_HOST=${VALKEY_HOST}
+      - REDIS_PORT=${VALKEY_PORT}
+      - REDIS_PASSWORD=${VALKEY_PASSWORD}
+      - REDIS_DATABASE=${VALKEY_DATABASE}
+      - WP_REDIS_HOST=${VALKEY_HOST}
+      - WP_REDIS_PORT=${VALKEY_PORT}
+      - WP_REDIS_PASSWORD=${VALKEY_PASSWORD}
+      - WP_REDIS_DATABASE=${VALKEY_DATABASE}
+      - WP_CACHE_KEY_SALT=${NPP_HTTP_HOST}
       - WORDPRESS_CONFIG_EXTRA=
           define('FORCE_SSL_ADMIN', true);
           define('FORCE_SSL_LOGIN', true);
@@ -37,129 +52,60 @@ services:
       - NPP_USER=${NPP_USER_}
       - NPP_UID=${NPP_UID_}
       - NPP_GID=${NPP_GID_}
-      - NPP_PLUGINS=${NPP_PLUGINS_}
-      - NPP_THEMES=${NPP_THEMES_}
-      - NPP_HACK_HOST=${NPP_HACK_HOST_}
-      - NPP_EDGE=${NPP_EDGE_}
-      - NPP_DEV_PLUGIN_NAME=${NPP_DEV_PLUGIN_NAME_}
-      - NPP_DEV_PLUGIN_DIR=${NPP_DEV_PLUGIN_DIR_}
-      - NPP_DEV_TMP_CLONE_DIR=${NPP_DEV_TMP_CLONE_DIR_}
-      - NPP_DEV_PLUGIN_FILE=${NPP_DEV_PLUGIN_FILE_}
-      - NPP_DEV_GITHUB_REPO=${NPP_DEV_GITHUB_REPO_}
-      - MOUNT_DIR=${MOUNT_DIR_}
       - WORDPRESS_SITE_URL=${WORDPRESS_SITE_URL_}
       - WORDPRESS_SITE_TITLE=${WORDPRESS_SITE_TITLE_}
       - WORDPRESS_ADMIN_USER=${WORDPRESS_ADMIN_USER_}
       - WORDPRESS_ADMIN_PASSWORD=${WORDPRESS_ADMIN_PASSWORD_}
       - WORDPRESS_ADMIN_EMAIL=${WORDPRESS_ADMIN_EMAIL_}
-    depends_on:
-      - db
-    security_opt:
-      - apparmor:unconfined
-      - seccomp:unconfined
-    cap_add:
-      - SYS_ADMIN
-    devices:
-      - /dev/fuse:/dev/fuse
-    networks:
-      npp_network:
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    post_start:
-      - command: /scripts/wp-post.sh
-        working_dir: ${NPP_WEB_ROOT_}
-        user: root
-    mem_limit: "2GB"
-    mem_reservation: "1GB"
-    cpus: "1.0"
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: "2GB"
-        reservations:
-          cpus: "1.0"
-          memory: "1GB"
-
-  db:
-    build:
-      context: .
-      dockerfile: mysql/Dockerfile
-    image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/mysql:latest
-    container_name: wordpress-db
-    env_file:
-      - .env
-    restart: unless-stopped
-    cap_add:
-      - SYS_NICE
-    security_opt:
-      - apparmor:unconfined
-      - seccomp:unconfined
-    volumes:
-      - ${MYSQL_HOME}:/var/lib/mysql
-      - ${NPP_MYSQL_CONF}:/etc/mysql/conf.d/50-npp-server.cnf
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=${MYSQL_DATABASE}
-      - MYSQL_USER=${MYSQL_USER}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-    networks:
-      npp_network:
-    mem_limit: "2GB"
-    mem_reservation: "1GB"
-    cpus: "1.0"
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: "2GB"
-        reservations:
-          cpus: "0.5"
-          memory: "1GB"
-
-  phpmyadmin:
-    build:
-      context: .
-      dockerfile: phpmyadmin/Dockerfile
-    image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/phpmyadmin:latest
-    container_name: phpmyadmin
-    env_file:
-      - .env
-    environment:
-      - PMA_HOST=db
-      - PMA_PORT=3306
-      - PMA_ABSOLUTE_URI=${PMA_ABSOLUTE_URI_}
-      - WORDPRESS_DB_USER=${WORDPRESS_DB_USER}
-      - WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD}
-      - WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME}
     networks:
       - npp_network
-    depends_on:
-      - db
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        order: stop-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2GB"
+        reservations:
+          cpus: "1.0"
+          memory: "1GB"
 
   nginx:
-    build:
-      context: .
-      dockerfile: nginx/Dockerfile
     image: ghcr.io/psaux-it/wordpress-nginx-cache-docker/nginx:latest
-    container_name: nginx
     env_file:
       - .env
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - wordpress
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.rule=Host(`${NPP_HTTP_HOST}`)"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls=true"
+      - "traefik.http.services.${TRAEFIK_ROUTER_NAME}.loadbalancer.server.port=80"
+      # HTTP to HTTPS redirect
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.rule=Host(`${NPP_HTTP_HOST}`)"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.entrypoints=web"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
     volumes:
       - ${WORDPRESS_HOME}:${NPP_WEB_ROOT_}:ro
       - ${NGINX_CACHE}:${NPP_NGINX_CACHE_PATH_}
       - ${NGINX_CONF}:/etc/nginx/nginx.conf
       - ${NPP_NGINX_CONF}:/etc/nginx/conf.d/default.conf
       - ${NPP_NGINX_PARAMS_CONF}:/etc/nginx/fastcgi_params
-      - ${NGINX_SSL_CERTS}:/etc/ssl:ro
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     environment:
@@ -169,13 +115,27 @@ services:
       - NPP_GID=${NPP_GID_}
       - NGINX_WEB_USER=${NGINX_WEB_USER_}
       - NPP_HTTP_HOST=${NPP_HTTP_HOST}
-      - MOUNT_DIR=${MOUNT_DIR_}
     networks:
-      npp_network:
-    mem_limit: "1.5GB"
-    mem_reservation: "1GB"
-    cpus: "1.0"
+      - npp_network
+      - traefik
     deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        order: start-first
       resources:
         limits:
           cpus: "1"
@@ -185,7 +145,6 @@ services:
           memory: "1GB"
 
 volumes:
-  wordpress-db:
   wordpress:
   nginx_cache:
     driver: local
@@ -196,6 +155,11 @@ volumes:
 
 networks:
   npp_network:
-    name: npp-wp
-    driver: bridge
-    enable_ipv6: false
+    driver: overlay
+    attachable: true
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
+  traefik:
+    external: true
+    name: traefik
